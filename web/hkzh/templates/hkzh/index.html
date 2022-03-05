@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div>
+        <div>
+            <li><strong>Total user: {{ total }}</strong></li>
+        </div>
+        <div>Status count:</div>
+        {% for row in status_count %}
+            <li>{{ row.status }}: {{ row.count }}</li>
+        {% endfor %}
+        <div>Status ticket price:</div>
+        {% for row in status_sum_ticket_price %}
+            <li>{{ row.status }}: {{ row.ticket_price }}</li>
+        {% endfor %}
+        <div>Status sell price:</div>
+        {% for row in status_sum_price %}
+            <li>{{ row.status }}: {{ row.price }}</li>
+        {% endfor %}
+        <div>Status passenger count:</div>
+        {% for row in status_sum_passenger %}
+            <li>{{ row.status }}: {{ row.count }}</li>
+        {% endfor %}
+    </div>
+{% endblock %}
