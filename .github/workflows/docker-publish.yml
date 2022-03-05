@@ -7,7 +7,7 @@ name: Docker
 
 on:
   push:
-    branches: [ main ]
+    branches: [ manage ]
     # Publish semver tags as releases.
 #     tags: [ 'v*.*.*' ]
 
@@ -74,15 +74,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          
-      - name: Build and push latest image
-        id: build-and-push-latest
-        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
-        with:
-          context: ./worker
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: latest
-          labels: ${{ steps.meta.outputs.labels }}
 
       # Sign the resulting Docker image digest except on PRs.
       # This will only write to the public Rekor transparency log when the Docker
@@ -96,11 +87,3 @@ jobs:
         # This step uses the identity token to provision an ephemeral certificate
         # against the sigstore community Fulcio instance.
         run: cosign sign ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-and-push-manage.outputs.digest }}
-
-      - name: Sign the published latest Docker image
-        if: ${{ github.event_name != 'pull_request' }}
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-        # This step uses the identity token to provision an ephemeral certificate
-        # against the sigstore community Fulcio instance.
-        run: cosign sign ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-and-push-latest.outputs.digest }}
