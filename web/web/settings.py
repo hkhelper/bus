@@ -89,7 +89,7 @@ host = ''
 port = ''
 username = ''
 password = ''
-db_name = ''
+db_name = 'hkzh'
 
 DATABASES = {
     'default': {
