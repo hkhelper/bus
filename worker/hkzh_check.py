@@ -357,7 +357,7 @@ def getOrderInfo(orderNumber, cookie, token):
     if ('code' in ret) and (ret['code'] == '408'):
         raise PermissionError(ret['message'])
     if len(ret['responseData']) > 0:
-        return ret['responseData'][0]
+        return ret['responseData']['0']
     else:
         raise AssertionError('Order %s not exist.' % orderNumber)
 
