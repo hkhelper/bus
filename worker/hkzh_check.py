@@ -377,6 +377,17 @@ def getOrderStatus(orderNumber, orderReqno, cookie, token):
         r = sendReq(url, data=data, method='post', cookie=cookie, headers=headers)
         ret = r.json()
         print('Update payment result returns: ', ret)
+        # skip get order details if update payment returns order info
+        if ('code' in ret) and (ret['code'] == 'SUCCESS') and ('responseData' in ret) and (
+                'status' in ret['responseData']) \
+                and ('exchangeCode' in ret['responseData']) and (ret['responseData']['status'] == '1') and (
+                len(ret['responseData']['exchangeCode']) > 10):
+            return {
+                'orderStatus': '1',
+                'orderNo': ret['responseData']['orderNo'],
+                'bcrq': ret['responseData']['ticketData'],
+                'bookBeginTime': ret['responseData']['bookBeginTime']
+            }
     return getOrderInfo(orderNumber, cookie, token)
     # return order['orderStatus']
 
@@ -611,6 +622,11 @@ def slotRespProc(data, date=None, method=None):
                 sendReq(url, timeout=3, retry=1, resp_json=False)
             except Exception as e:
                 print('Telegram notified.')
+        try:
+            updateSlotList(fullslotlist)
+        except Exception as e:
+            print('Save slot list to DB error: ', e)
+            return False
 
     elif (method == 'slot') and (len(fullslotlist) > 0):
         try:
@@ -772,6 +788,13 @@ async def checkRun():
                     for i in range(0, concurrency_level):
                         asyncio.create_task(checkAvailableSlot(date, line_code, 'slot'))
                         await asyncio.sleep(checkdate_step)
+        elif int(getConfigValue('CHECK_SLOT_RUN')) == 3:
+            for line_code in check_line_code.split(','):
+                for date in getConfigValue('SCHEDULE_CHECK_DATE').split(','):
+                    for i in range(0, concurrency_level):
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen'))
+                        await asyncio.sleep(checkdate_step)
+
 
         await asyncio.sleep(step)
 
