@@ -144,6 +144,11 @@ class UserGet(generics.RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    
+    def get(self, request, *args, **kwargs):
+        # save to update updatedAt
+        User.objects.get(id=kwargs['pk']).save()
+        return super().get(request, *args, **kwargs)
 
 class UserUpdate(generics.UpdateAPIView):
     permission_classes = (IsAuthenticated,)
