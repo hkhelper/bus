@@ -152,6 +152,15 @@ def getOrderStatus(orderNumber, orderReqno, cookie, token):
         if ('code' in ret) and (ret['code'] == '408'):
             raise PermissionError(ret['message'])
         print('Update payment result returns: ', ret)
+        # skip get order details if update payment returns order info
+        if ('code' in ret) and (ret['code'] == 'SUCCESS') and ('responseData' in ret) and ('status' in ret['responseData']) \
+                and ('exchangeCode' in ret['responseData']) and (ret['responseData']['status'] == '1') and (len(ret['responseData']['exchangeCode']) > 10):
+            return {
+                'orderStatus': '1',
+                'orderNo': ret['responseData']['orderNo'],
+                'bcrq': ret['responseData']['ticketData'],
+                'bookBeginTime': ret['responseData']['bookBeginTime']
+            }
     return getOrderDetails(orderNumber, cookie, token)
     # return order['orderStatus']
 
@@ -446,6 +455,14 @@ def bookRun(user):
     while True:
         now = datetime.now()
         print(now.strftime('%m-%d %H:%M:%S'))
+        # update status.
+        user = getBookInfo(user['id'])
+        if user['status'] in ['paid', 'done']:
+            print('Status is %s'%user['status'])
+            return True
+        elif user['status'] in ['canceled', 'pending']:
+            print('Status is %s'%user['status'])
+            return False
 
         needLogin = False
         if (user['status'] == 'processing') or (user['cookie'] is None) or (user['cookie'] == ''):
@@ -486,8 +503,6 @@ def bookRun(user):
         cookie, token, createdAt = user['cookie'].split(',')
 
         if user['status'] in ['payment', 'checking', 'booked']:
-            # update status.
-            user = getBookInfo(user['id'])
             if (user['bookNumber'] == '') or (user['bookNumber'] is None):
                 try:
                     # find orderNumber
@@ -516,6 +531,9 @@ def bookRun(user):
                     print(e)
                     print('Relogin...')
                     user['cookie'] = None
+                    updateBookInfo(user['id'], {
+                        'cookie': user['cookie']
+                    })
                     continue
                 except Exception as e:
                     print('getPaymentLink failed:', e)
@@ -541,6 +559,9 @@ def bookRun(user):
                 print(e)
                 print('Relogin...')
                 user['cookie'] = None
+                updateBookInfo(user['id'], {
+                    'cookie': user['cookie']
+                })
                 continue
             except Exception as e:
                 print(e)
@@ -585,6 +606,9 @@ def bookRun(user):
                             print(e)
                             print('Relogin...')
                             user['cookie'] = None
+                            updateBookInfo(user['id'], {
+                                'cookie': user['cookie']
+                            })
                             break
                         except ValueError as e:
                             print(str(e))
