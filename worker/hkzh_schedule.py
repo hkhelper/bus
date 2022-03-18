@@ -92,31 +92,41 @@ def updateBookInfo(id, data):
         return False
 
 def login(user, pwd):
-    url = base_url + '/login'
-    data = {"webUserid": user, "passWord": pwd, "code": "", "appId": "HZMBWEB_HK", "joinType": "WEB",
-            "version": version, "equipment": "PC"}
-    r = sendReq(url, data=data, method='post')
-    cookie = r.cookies
-    ret = r.json()
-    if ('code' not in ret) or ('message' not in ret):
-        print('Login returned json error: ' + str(ret))
+    success = False
+    retAry = {}
+    for burl in base_url.split(';'):
+        url = burl + '/login'
+        data = {"webUserid": user, "passWord": pwd, "code": "", "appId": "HZMBWEB_HK", "joinType": "WEB",
+                "version": version, "equipment": "PC"}
+        try:
+            r = sendReq(url, data=data, method='post')
+        except Exception as e:
+            continue
+        cookie = r.cookies
+        ret = r.json()
+        if ('code' not in ret) or ('message' not in ret):
+            print('Login returned json error: ' + str(ret))
+            continue
+        if ret['code'] == 'FAIL':
+            if ret['message'] in ['賬戶或密碼錯誤', '用戶不存在']:
+                raise AssertionError(ret['message'])
+            print('Login failed: '+ret['message'])
+            continue
+        if 'jwt' not in ret:
+            print('Login token not found in return: ' + str(ret))
+            continue
+        token = ret['jwt']
+        success = True
+        retAry[burl] = {'cookie': cookie.get_dict()['PHPSESSID'], 'token': token}
+        if debug:
+            print('cookie:', cookie)
+            print('Authorization:', token)
+    if success is False:
         return False
-    if ret['code'] == 'FAIL':
-        if ret['message'] in ['賬戶或密碼錯誤', '用戶不存在']:
-            raise AssertionError(ret['message'])
-        print('Login failed: '+ret['message'])
-        return False
-    if 'jwt' not in ret:
-        print('Login token not found in return: ' + str(ret))
-        return False
-    token = ret['jwt']
-    if debug:
-        print('cookie:', cookie)
-        print('Authorization:', token)
-    return {'cookie': cookie, 'token': token}
+    return retAry
 
-def getOrderDetails(orderNumber, cookie, token):
-    url = base_url + '/wx/query.wx.order.info'
+def getOrderDetails(orderNumber, cookie):
+    url = '/wx/query.wx.order.info'
     data = {
         "orderNo": orderNumber,
         "appId": "HZMBWEB_HK",
@@ -124,8 +134,7 @@ def getOrderDetails(orderNumber, cookie, token):
         "version": version,
         "equipment": "PC"
     }
-    headers = {'Authorization': token}
-    r = sendReq(url, data=data, method='post', cookie=cookie, headers=headers)
+    r = sendReq(url, data=data, method='post', cookie=cookie)
     ret = r.json()
     if ('code' in ret) and (ret['code'] == '408'):
         raise PermissionError(ret['message'])
@@ -134,10 +143,10 @@ def getOrderDetails(orderNumber, cookie, token):
     else:
         raise AssertionError('Order %s not exist.' % orderNumber)
 
-def getOrderStatus(orderNumber, orderReqno, cookie, token):
+def getOrderStatus(orderNumber, orderReqno, cookie):
     if orderReqno is not None:
         # update payment result
-        url = base_url + '/pay/update.order.payresult'
+        url = '/pay/update.order.payresult'
         data = {
             'appId': "HZMBWEB_HK",
             'equipment': "PC",
@@ -146,8 +155,7 @@ def getOrderStatus(orderNumber, orderReqno, cookie, token):
             'payType': "MasterCard",
             'version': version
         }
-        headers = {'Authorization': token}
-        r = sendReq(url, data=data, method='post', cookie=cookie, headers=headers)
+        r = sendReq(url, data=data, method='post', cookie=cookie)
         ret = r.json()
         if ('code' in ret) and (ret['code'] == '408'):
             raise PermissionError(ret['message'])
@@ -161,10 +169,16 @@ def getOrderStatus(orderNumber, orderReqno, cookie, token):
                 'bcrq': ret['responseData']['ticketData'],
                 'bookBeginTime': ret['responseData']['bookBeginTime']
             }
-    return getOrderDetails(orderNumber, cookie, token)
+    return getOrderDetails(orderNumber, cookie)
     # return order['orderStatus']
 
-def book(date, beginTime, endTime, peoples, cookie, token, line, captcha):
+def book(date, beginTime, endTime, peoples, cookie, line, captcha, baseurl):
+    newcookie = {}
+    for bUrl, obj in cookie.items():
+        if bUrl == baseurl:
+            newcookie[bUrl] = obj
+            break
+
     tickets = []
     price = 0
     for people in peoples:
@@ -188,7 +202,7 @@ def book(date, beginTime, endTime, peoples, cookie, token, line, captcha):
                 "telNum": ""
             })
             price += 6500
-    url = base_url + '/ticket/buy.ticket'
+    url = '/ticket/buy.ticket'
     data = {
         "ticketData": date,
         "lineCode": line,
@@ -211,8 +225,7 @@ def book(date, beginTime, endTime, peoples, cookie, token, line, captcha):
         "version": version,
         "equipment": "PC"
     }
-    headers = {'Authorization': token}
-    r = sendReq(url, data=data, method='post', cookie={'PHPSESSID': cookie}, headers=headers)
+    r = sendReq(url, data=data, method='post', cookie=newcookie, timeout=book_timeout)
     ret = r.json()
     if ('responseData' in ret) and ('orderNumber' in ret['responseData']):
         return ret['responseData']['orderNumber']
@@ -234,8 +247,8 @@ def book(date, beginTime, endTime, peoples, cookie, token, line, captcha):
         # Retry
         raise TimeoutError('Failed')
 
-def getPaymentLink(orderId, cookie, token):
-    url = base_url + '/wx/query.wx.order.payreq'
+def getPaymentLink(orderId, cookie):
+    url = '/wx/query.wx.order.payreq'
     data = {
         'appId': "HZMBWEB_HK",
         'currency': "2",
@@ -247,9 +260,8 @@ def getPaymentLink(orderId, cookie, token):
         'payType': "MasterCard",
         'version': version,
     }
-    headers = {'Authorization': token}
     try:
-        r = sendReq(url, data=data, method='post', cookie=cookie, headers=headers)
+        r = sendReq(url, data=data, method='post', cookie=cookie)
         ret = r.json()
     except Exception as e:
         print('Get payment link failed: ',e)
@@ -275,22 +287,42 @@ def getPaymentLink(orderId, cookie, token):
     endTime = ret['responseData']['tradeEtime']
     return {'session': sessionId, 'orderReqno': orderReqno, 'endTime': endTime}
 
-def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=True, cookie=None, headers=None, skipErrorStatusCode=False):
+def sendReq(reqUrl, data=None, method='get', timeout=None, retry=None, resp_json=True, cookie=None, headers=None, skipErrorStatusCode=False, returnBaseUrl=False):
     if timeout is None:
         timeout = req_timeout
     if retry is None:
         retry = req_retry
 
+    if cookie is not None:
+        urlAry = []
+        cookieStrAry = []
+        tokenAry = []
+        if headers is None:
+            headers = {}
+        for bUrl, obj in cookie.items():
+            if 'token' in obj:
+                tokenAry.append(obj['token'])
+                cookieStrAry.append(obj['cookie'])
+                urlAry.append(bUrl)
+
     while retry > 0:
+        if cookie is not None:
+            baseurl = urlAry[retry % len(urlAry)]
+            url = baseurl + reqUrl
+            cookieStr = {'PHPSESSID': cookieStrAry[retry % len(urlAry)]}
+            headers['Authorization'] = tokenAry[retry % len(urlAry)]
+        else:
+            cookieStr = None
+            url = reqUrl
         try:
             if debug:
                 print('Req. ...', url)
             if method == 'get':
-                r = requests.get(url, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookie)
+                r = requests.get(url, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookieStr)
             elif method == 'patch':
-                r = requests.patch(url, json=data, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookie)
+                r = requests.patch(url, json=data, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookieStr)
             else:
-                r = requests.post(url, json=data, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookie)
+                r = requests.post(url, json=data, timeout=timeout, allow_redirects=False, headers=headers, cookies=cookieStr)
             if not skipErrorStatusCode:
                 r.raise_for_status()
             if r.status_code == 302:
@@ -317,7 +349,10 @@ def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=Tr
             continue
         if debug:
             print('Got return: ', ret)
-        return r
+        if returnBaseUrl:
+            return r, baseurl
+        else:
+            return r
     print('Retry too many times. Failed.')
     raise Exception('Retry too many times. Failed.')
 
@@ -344,12 +379,12 @@ def selectSlot(linecode, datelist, count):
         return df.to_dict('records')
 
 # 取账户里的指定的状态订单
-def getAccountOrders(token, paid=False):
+def getAccountOrders(cookie, paid=False):
     if paid:
         status = 1
     else:
         status = 0
-    url = base_url + '/wx/query.wx.order.record'
+    url = '/wx/query.wx.order.record'
     data = {
         'appId': "HZMBWEB_HK",
         'equipment': "PC",
@@ -360,8 +395,7 @@ def getAccountOrders(token, paid=False):
         'ticketCategory': "1,2",
         'version': version
     }
-    headers = {'Authorization': token}
-    r = sendReq(url, data=data, method='post', cookie=None, headers=headers)
+    r = sendReq(url, data=data, method='post', cookie=cookie)
     ret = r.json()
     if ('code' in ret) and (ret['code'] == '408'):
         raise PermissionError(ret['message'])
@@ -372,7 +406,7 @@ def getAccountOrders(token, paid=False):
 
 # 比较账户中的订单是否和预订单一致
 def compareExistOrders(orders, book):
-    cookie, token, createdAt = book['cookie'].split(',')
+    cookie = json.loads(book['cookie'])
     for order in orders:
         orderNo = order['orderNo']
         isThisOrder = True
@@ -387,7 +421,7 @@ def compareExistOrders(orders, book):
             continue
         # if HKGZHO compare the passengers.
         if book['line_code'] in ['HKGZHO', 'HKGMAC']:
-            accountOrderInfo = getOrderDetails(orderNumber=orderNo, cookie=None, token=token)
+            accountOrderInfo = getOrderDetails(orderNumber=orderNo, cookie=cookie)
             for passenger in book['passengers']:
                 if passenger['id'][0] == '#':
                     passengerId = passenger['id'][1:]
@@ -400,10 +434,10 @@ def compareExistOrders(orders, book):
             return orderNo
     return False
 
-def findOrderFromAccount(user, token):
-    accountOrders = getAccountOrders(token, False)
+def findOrderFromAccount(user, cookie):
+    accountOrders = getAccountOrders(cookie, False)
     if len(accountOrders) == 0:
-        accountOrders = getAccountOrders(token, True)
+        accountOrders = getAccountOrders(cookie, True)
         if len(accountOrders) == 0:
             print('Have not found any order in the account.')
             return None
@@ -421,7 +455,7 @@ def findOrderFromAccount(user, token):
             print('Found unpaid order %s' % orderId)
             return orderId
         else:
-            accountOrders = getAccountOrders(token, True)
+            accountOrders = getAccountOrders(cookie, True)
             if len(accountOrders) == 0:
                 print('Have not found any order in the account.')
                 return None
@@ -446,9 +480,9 @@ def captchaFromCjy(imageBase64):
         raise AssertionError('CJY returns error: ' + ret['err_str'])
 
 def getCaptcha(cookie):
-    url = base_url + '/captcha'
-    r = sendReq(url, cookie={'PHPSESSID': cookie}, resp_json=False)
-    return base64.b64encode(r.content).decode('utf-8')
+    url = '/captcha'
+    r, baseurl = sendReq(url, cookie=cookie, resp_json=False, returnBaseUrl=True)
+    return baseurl, base64.b64encode(r.content).decode('utf-8')
 
 
 def bookRun(user):
@@ -468,7 +502,8 @@ def bookRun(user):
         if (user['status'] == 'processing') or (user['cookie'] is None) or (user['cookie'] == ''):
             needLogin = True
         else:
-            cookie, token, createdAt = user['cookie'].split(',')
+            cookie = json.loads(user['cookie'])
+            createdAt = cookie['createdAt']
             createdAt = datetime.strptime(createdAt, '%Y-%m-%d %H:%M:%S')
             if (createdAt + timedelta(minutes=login_expire_minutes)) < now:
                 needLogin = True
@@ -492,7 +527,8 @@ def bookRun(user):
             if not LoginRet:
                 print('Login failed.')
                 continue
-            user['cookie'] = LoginRet['cookie'].get_dict()['PHPSESSID'] + ',' + LoginRet['token'] + ',' + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            LoginRet['createdAt'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            user['cookie'] = json.dumps(LoginRet)
             if user['status'] == 'processing':
                 user['status'] = 'login'
             updateBookInfo(user['id'], {
@@ -500,13 +536,13 @@ def bookRun(user):
                 'status': user['status']
             })
             print('Login success.')
-        cookie, token, createdAt = user['cookie'].split(',')
+            cookie = LoginRet
 
         if user['status'] in ['payment', 'checking', 'booked']:
             if (user['bookNumber'] == '') or (user['bookNumber'] is None):
                 try:
                     # find orderNumber
-                    user['bookNumber'] = findOrderFromAccount(user, token)
+                    user['bookNumber'] = findOrderFromAccount(user, cookie)
                 except Exception as e:
                     print(e)
                     continue
@@ -526,7 +562,7 @@ def bookRun(user):
             if len(user['bookNumber'].split(',')) < 3:
                 order = user['bookNumber'].split(',')[0]
                 try:
-                    paylink = getPaymentLink(order, None, token)
+                    paylink = getPaymentLink(order, cookie)
                 except PermissionError as e:
                     print(e)
                     print('Relogin...')
@@ -554,7 +590,7 @@ def bookRun(user):
             else:
                 orderReqno = None
             try:
-                status = getOrderStatus(orderNumber=user['bookNumber'].split(',')[0], orderReqno=orderReqno, cookie=None, token=token)
+                status = getOrderStatus(orderNumber=user['bookNumber'].split(',')[0], orderReqno=orderReqno, cookie=cookie)
             except PermissionError as e:
                 print(e)
                 print('Relogin...')
@@ -599,9 +635,9 @@ def bookRun(user):
                     order = None
                     for bi in range(book_retry):
                         try:
-                            captchaBase64 = getCaptcha(cookie)
+                            baseurl, captchaBase64 = getCaptcha(cookie)
                             captcha = captchaFromCjy(captchaBase64)
-                            order = book(slot['date'], slot['time'], slot['time'], user['passengers'], cookie, token, slot['linecode'], captcha)
+                            order = book(slot['date'], slot['time'], slot['time'], user['passengers'], cookie, slot['linecode'], captcha, baseurl=baseurl)
                         except PermissionError as e:
                             print(e)
                             print('Relogin...')
@@ -623,6 +659,7 @@ def bookRun(user):
                         except Exception as e:
                             print('Book failed:', e)
                             break
+                        break
                     if order is None:
                         if user['cookie'] is None:
                             break
@@ -655,6 +692,7 @@ if __name__ == '__main__':
     req_timeout = int(getConfigValue('SCHEDULE_TIMEOUT'))
     req_retry = int(getConfigValue('SCHEDULE_RETRY'))
     book_retry = int(getConfigValue('BOOK_RETRY'))
+    book_timeout = int(getConfigValue('BOOK_TIMEOUT'))
     login_expire_minutes = int(getConfigValue('CHECK_LOGIN_EXPIRE_MINUTES'))
     cjy_auth = getConfigValue('CJY_AUTH')
     cjy_user, cjy_pass, cjy_soft, cjy_type = cjy_auth.split(',')
