@@ -45,7 +45,7 @@ def redirectPayment(session):
 
 
 def login(username, password, debug=False):
-    url = BASE_URL + '/login'
+    url = BASE_URL.split(';')[0] + '/login'
     data = {"webUserid": username, "passWord": password, "code": "", "appId": "HZMBWEB_HK", "joinType": "WEB",
             "version": VERSION, "equipment": "PC"}
     r = sendReq(url, data=data, method='post')
@@ -63,63 +63,63 @@ def login(username, password, debug=False):
         print('Authorization:', token)
     return {'cookie': cookie, 'token': token}
 
-def book(date, time, peoples, token, line):
-    tickets = []
-    price = 0
-    for people in peoples:
-        if people['id'][0] == '#':
-            #child
-            tickets.append({
-                "ticketType": "01",
-                "idCard": people['id'][1:] if (line in ['HKGZHO', 'HKGMAC']) else '',
-                "idType": 1,
-                "userName": people['name'] if (line in ['HKGZHO', 'HKGMAC']) else '',
-                "telNum": ""
-            })
-            price += 3300
-        else:
-            #adult
-            tickets.append({
-                "ticketType": "00",
-                "idCard": people['id'] if (line in ['HKGZHO', 'HKGMAC']) else '',
-                "idType": 1,
-                "userName": people['name'] if (line in ['HKGZHO', 'HKGMAC']) else '',
-                "telNum": ""
-            })
-            price += 6500
-    url = BASE_URL + '/ticket/buy.ticket'
-    data = {
-        "ticketData": date,
-        "lineCode": line,
-        "startStationCode": line[:3],
-        "endStationCode": line[3:],
-        "boardingPointCode": line[:3]+"01",
-        "breakoutPointCode": line[3:]+"01",
-        "currency": "2",  ###HKD
-        "ticketCategory": "1",
-        "tickets": tickets,
-        "amount": price,
-        "feeType": 9,  ###
-        "totalVoucherpay": 0, "voucherNum": 0, "voucherStr": "", "totalBalpay": 0,
-        "totalNeedpay": price,
-        "bookBeginTime": time,
-        "bookEndTime": time,
-        "appId": "HZMBWEB_HK",
-        "joinType": "WEB",
-        "version": VERSION,
-        "equipment": "PC"
-    }
-    headers = {'Authorization': token}
-    r = sendReq(url, data=data, method='post', cookie=None, headers=headers)
-    ret = r.json()
-    if ('responseData' in ret) and ('orderNumber' in ret['responseData']):
-        return ret['responseData']['orderNumber']
-    elif ('code' in ret) and ('message' in ret) and (ret['code'] == 'FAIL') and (ret['message'] == '您還有未支付的訂單,請先支付后再進行購票,謝謝!'):
-        print('User has unpaid orders.')
-        return ''
-    else:
-        print('Book failed. ', ret)
-        raise AssertionError('Failed:'+str(ret))
+# def book(date, time, peoples, token, line):
+#     tickets = []
+#     price = 0
+#     for people in peoples:
+#         if people['id'][0] == '#':
+#             #child
+#             tickets.append({
+#                 "ticketType": "01",
+#                 "idCard": people['id'][1:] if (line in ['HKGZHO', 'HKGMAC']) else '',
+#                 "idType": 1,
+#                 "userName": people['name'] if (line in ['HKGZHO', 'HKGMAC']) else '',
+#                 "telNum": ""
+#             })
+#             price += 3300
+#         else:
+#             #adult
+#             tickets.append({
+#                 "ticketType": "00",
+#                 "idCard": people['id'] if (line in ['HKGZHO', 'HKGMAC']) else '',
+#                 "idType": 1,
+#                 "userName": people['name'] if (line in ['HKGZHO', 'HKGMAC']) else '',
+#                 "telNum": ""
+#             })
+#             price += 6500
+#     url = BASE_URL + '/ticket/buy.ticket'
+#     data = {
+#         "ticketData": date,
+#         "lineCode": line,
+#         "startStationCode": line[:3],
+#         "endStationCode": line[3:],
+#         "boardingPointCode": line[:3]+"01",
+#         "breakoutPointCode": line[3:]+"01",
+#         "currency": "2",  ###HKD
+#         "ticketCategory": "1",
+#         "tickets": tickets,
+#         "amount": price,
+#         "feeType": 9,  ###
+#         "totalVoucherpay": 0, "voucherNum": 0, "voucherStr": "", "totalBalpay": 0,
+#         "totalNeedpay": price,
+#         "bookBeginTime": time,
+#         "bookEndTime": time,
+#         "appId": "HZMBWEB_HK",
+#         "joinType": "WEB",
+#         "version": VERSION,
+#         "equipment": "PC"
+#     }
+#     headers = {'Authorization': token}
+#     r = sendReq(url, data=data, method='post', cookie=None, headers=headers)
+#     ret = r.json()
+#     if ('responseData' in ret) and ('orderNumber' in ret['responseData']):
+#         return ret['responseData']['orderNumber']
+#     elif ('code' in ret) and ('message' in ret) and (ret['code'] == 'FAIL') and (ret['message'] == '您還有未支付的訂單,請先支付后再進行購票,謝謝!'):
+#         print('User has unpaid orders.')
+#         return ''
+#     else:
+#         print('Book failed. ', ret)
+#         raise AssertionError('Failed:'+str(ret))
 
 def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=True, cookie=None, headers=None, debug=False, skipErrorStatusCode=False):
     if timeout is None:
@@ -168,8 +168,12 @@ def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=Tr
     print('Retry too many times. Failed.')
     raise Exception('Retry too many times. Failed.')
 
-def getOrders(orderStatus, token):
-    url = BASE_URL + '/wx/query.wx.order.record'
+def getOrders(orderStatus, cookie):
+    for base, d in cookie.items():
+        base_url = base
+        token = d['token']
+        break
+    url = base_url + '/wx/query.wx.order.record'
     data = {
         'appId': "HZMBWEB_HK",
         'equipment': "PC",
