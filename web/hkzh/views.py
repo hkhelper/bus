@@ -183,6 +183,7 @@ class SlotUpdateViewSet(viewsets.ModelViewSet):
         ###
 
         for single_slot in serializer.validated_data:
+            Log.objects.create(code='Found-'+single_slot['linecode'], msg='%i available in %s.' % (int(single_slot['availablePeople']), (single_slot['date'] + ' ' + single_slot['time'])))
             # Try to get proportion from database for selected user
             try:
                 slot = Slot.objects.get(linecode=single_slot['linecode'], date=single_slot['date'], time=single_slot['time'])
