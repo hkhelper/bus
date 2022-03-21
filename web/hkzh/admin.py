@@ -83,6 +83,16 @@ def status_processing_action(modeladmin, request, queryset):
             obj.save()
             count += 1
     modeladmin.message_user(request, 'You moved %i orders to Processing.' % count, messages.SUCCESS)
+    
+@admin.action(description='*->Pending')
+def status_pending_action(modeladmin, request, queryset):
+    count = 0
+    for obj in queryset:
+        if obj.status in ['processing', 'login', 'booked', 'payment', 'checking']:
+            obj.status = 'pending'
+            obj.save()
+            count += 1
+    modeladmin.message_user(request, 'You moved %i orders to pending.' % count, messages.SUCCESS)
 
 # @admin.action(description='Force Book!')
 # def force_book_action(modeladmin, request, queryset):
@@ -193,6 +203,7 @@ class UserAdmin(ExportActionMixin, admin.ModelAdmin):
         # force_book_action,
         check_collect_action,
         status_processing_action,
+        status_pending_action,
         paid_action,
         done_action
     ]
