@@ -572,11 +572,11 @@ def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=Tr
     print('Retry too many times. Failed.')
     raise Exception('Retry too many times. Failed.')
 
-async def checkAvailableSlot(date, line_code, method):
+async def checkAvailableSlot(date, line_code, method, i=0):
     if debug:
         print(' Looking for available slot on ', date)
     async with httpx.AsyncClient() as client:
-        url = base_url.split(';')[0] + '/manage/query.book.info.data'
+        url = base_url.split(';')[i] + '/manage/query.book.info.data'
         data = {"bookDate": date, "lineCode": line_code, "appId": "HZMBWEB_HK", "joinType": "WEB",
                 "version": version, "equipment": "PC"}
         try:
@@ -804,29 +804,30 @@ async def checkRun():
             except Exception as e:
                 print('Check booked order failed: ', e)
 
+        baseurl_count = len(base_url.split(';'))
         date_delta = datetime.strptime(check_end_date, '%Y-%m-%d') - now
         if int(getConfigValue('CHECK_SLOT_RUN')) == 1:
             for line_code in check_line_code.split(','):
                 for n in range(0, date_delta.days+2):
                     for i in range(0, concurrency_level):
                         date = (now + timedelta(days=n)).strftime('%Y-%m-%d')
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'check'))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'check', i % baseurl_count))
                         await asyncio.sleep(checkdate_step)
                 for i in range(0, concurrency_level):
                     date = getConfigValue('SCHEDULE_CHECK_DATE').split(',')[0]
-                    asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen'))
+                    asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', i % baseurl_count))
                     await asyncio.sleep(checkdate_step)
         elif int(getConfigValue('CHECK_SLOT_RUN')) == 2:
             for line_code in check_line_code.split(','):
                 for date in getConfigValue('SCHEDULE_CHECK_DATE').split(','):
                     for i in range(0, concurrency_level):
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'slot'))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'slot', i % baseurl_count))
                         await asyncio.sleep(checkdate_step)
         elif int(getConfigValue('CHECK_SLOT_RUN')) == 3:
             for line_code in check_line_code.split(','):
                 for date in getConfigValue('SCHEDULE_CHECK_DATE').split(','):
                     for i in range(0, concurrency_level):
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen'))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', i % baseurl_count))
                         await asyncio.sleep(checkdate_step)
 
 
