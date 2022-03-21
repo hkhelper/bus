@@ -481,7 +481,7 @@ def captchaFromCjy(imageBase64):
 
 def getCaptcha(cookie):
     url = '/captcha'
-    r, baseurl = sendReq(url, cookie=cookie, resp_json=False, returnBaseUrl=True)
+    r, baseurl = sendReq(url, cookie=cookie, resp_json=False, returnBaseUrl=True, timeout=book_timeout)
     return baseurl, base64.b64encode(r.content).decode('utf-8')
 
 
