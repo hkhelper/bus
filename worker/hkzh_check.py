@@ -579,8 +579,9 @@ async def checkAvailableSlot(date, line_code, method, i=0):
         url = base_url.split(';')[i] + '/manage/query.book.info.data'
         data = {"bookDate": date, "lineCode": line_code, "appId": "HZMBWEB_HK", "joinType": "WEB",
                 "version": version, "equipment": "PC"}
+        headers = {'Authorization':  slot_token.split(';')[i]}
         try:
-            resp = await client.post(url=url, json=data, timeout=req_timeout)
+            resp = await client.post(url=url, json=data, timeout=req_timeout, headers=headers)
         except:
             print(time.strftime("%H:%M:%S") + f'  #Req. failed or times out({req_timeout}s). ')
             return slotRespProc(data=False)
@@ -841,6 +842,7 @@ if __name__ == '__main__':
     debug = False
     req_timeout = req_retry = 10
     base_url = getConfigValue('BASE_URL')
+    slot_token = getConfigValue('slot_token')
     trig_url = getConfigValue('TRIG_URL')
     wxpusher = getConfigValue('WX_PUSHER')
     telegram_id = getConfigValue('TG_ID')
