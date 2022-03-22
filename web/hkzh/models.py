@@ -7,7 +7,7 @@ from django.utils import timezone
 # Create your models here.
 class Config(models.Model):
     key = models.CharField(max_length=100, primary_key=True)
-    value = models.CharField(max_length=500, blank=True, default="")
+    value = models.CharField(max_length=9000, blank=True, default="")
     comment = models.CharField(max_length=500, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
