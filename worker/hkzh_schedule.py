@@ -19,6 +19,41 @@ def getConfigValue(key):
         print('config %s not found.'%key)
         return None
 
+
+def getConfigs():
+    url = django_url + 'hkzh/api/config/'
+    headers = {'Authorization': 'Token ' + django_token}
+    try:
+        r = sendReq(url, headers=headers, skipErrorStatusCode=True)
+        ret = r.json()
+    except Exception as e:
+        raise ValueError('Get config list error.')
+    config = {}
+    for row in ret:
+        config[row['key']] = row['value']
+    return config
+
+
+def setConfigs():
+    global base_url, version, step, debug, req_timeout, req_retry, book_retry, book_timeout, cjy_auth, cjy_user, cjy_pass, cjy_soft, \
+        cjy_type, schedule_run, login_expire_minutes, login_both
+
+    config = getConfigs()
+    
+    base_url = config['BASE_URL']
+    version = config['API_VERSION']
+    step = float(config['SCHEDULE_STEP'])
+    login_both = bool(config['SCHEDULE_LOGIN_BOTH'])
+    debug = bool(config['SCHEDULE_DEBUG'])
+    req_timeout = float(config['SCHEDULE_TIMEOUT'])
+    req_retry = int(config['SCHEDULE_RETRY'])
+    book_retry = int(config['BOOK_RETRY'])
+    book_timeout = int(config['BOOK_TIMEOUT'])
+    login_expire_minutes = int(config['CHECK_LOGIN_EXPIRE_MINUTES'])
+    cjy_auth = config['CJY_AUTH']
+    schedule_run = bool(config['SCHEDULE_RUN'])
+    cjy_user, cjy_pass, cjy_soft, cjy_type = cjy_auth.split(',')
+
 def selectUser():
     node = socket.gethostname()
     url = django_url + 'hkzh/api/user/get_schedule/'+node+'/'
@@ -91,10 +126,19 @@ def updateBookInfo(id, data):
         print('Update user %i failed: '%id, str(ret))
         return False
 
-def login(user, pwd):
+def baseExistInCookie(baseUrl, cookie):
+    for objBurl, obj in cookie.items():
+        if ('token' in obj) and (baseUrl == objBurl):
+            return True
+    return False
+
+def login(user, pwd, cookieAry=None):
     success = False
-    retAry = {}
+    retAry = cookieAry if (cookieAry is not None) else {}
     for burl in base_url.split(';'):
+        if (cookieAry is not None) and (baseExistInCookie(burl, cookieAry)):
+            continue
+
         url = burl + '/login'
         data = {"webUserid": user, "passWord": pwd, "code": "", "appId": "HZMBWEB_HK", "joinType": "WEB",
                 "version": version, "equipment": "PC"}
@@ -121,7 +165,7 @@ def login(user, pwd):
         if debug:
             print('cookie:', cookie)
             print('Authorization:', token)
-    if success is False:
+    if (success is False) and (cookieAry is None):
         return False
     return retAry
 
@@ -379,11 +423,7 @@ def selectSlot(linecode, datelist, count):
         return df.to_dict('records')
 
 # 取账户里的指定的状态订单
-def getAccountOrders(cookie, paid=False):
-    if paid:
-        status = 1
-    else:
-        status = 0
+def getAccountOrders(cookie, status=''):
     url = '/wx/query.wx.order.record'
     data = {
         'appId': "HZMBWEB_HK",
@@ -405,7 +445,7 @@ def getAccountOrders(cookie, paid=False):
         return []
 
 # 比较账户中的订单是否和预订单一致
-def compareExistOrders(orders, book):
+def compareExistOrders(orders, book, restrict=False):
     cookie = json.loads(book['cookie'])
     for order in orders:
         orderNo = order['orderNo']
@@ -419,8 +459,10 @@ def compareExistOrders(orders, book):
         if book['sort_date'].find(order['bcrq']) < 0:
             isThisOrder = False
             continue
-        # if HKGZHO compare the passengers.
-        if book['line_code'] in ['HKGZHO', 'HKGMAC']:
+        # Do NOT need to compare the passengers since that one more req.
+        # Just make sure each account only exist in one user each time.
+        # compare the passengers.
+        if restrict and (book['line_code'] in ['HKGZHO', 'HKGMAC']):
             accountOrderInfo = getOrderDetails(orderNumber=orderNo, cookie=cookie)
             for passenger in book['passengers']:
                 if passenger['id'][0] == '#':
@@ -434,10 +476,19 @@ def compareExistOrders(orders, book):
             return orderNo
     return False
 
+def filterOrders(orders, status):
+    ret = []
+    for order in orders:
+        if order['orderStatus'] == status:
+            ret.append(order)
+    return ret
+
 def findOrderFromAccount(user, cookie):
-    accountOrders = getAccountOrders(cookie, False)
+    allAccountOrders = getAccountOrders(cookie, '0,1')
+
+    accountOrders = filterOrders(allAccountOrders, '0')
     if len(accountOrders) == 0:
-        accountOrders = getAccountOrders(cookie, True)
+        accountOrders = filterOrders(allAccountOrders, '1')
         if len(accountOrders) == 0:
             print('Have not found any order in the account.')
             return None
@@ -455,7 +506,7 @@ def findOrderFromAccount(user, cookie):
             print('Found unpaid order %s' % orderId)
             return orderId
         else:
-            accountOrders = getAccountOrders(cookie, True)
+            accountOrders = filterOrders(allAccountOrders, '1')
             if len(accountOrders) == 0:
                 print('Have not found any order in the account.')
                 return None
@@ -487,6 +538,8 @@ def getCaptcha(cookie):
 
 def bookRun(user):
     while True:
+        setConfigs()
+
         now = datetime.now()
         print(now.strftime('%m-%d %H:%M:%S'))
         # update status.
@@ -501,17 +554,23 @@ def bookRun(user):
         needLogin = False
         if (user['status'] == 'processing') or (user['cookie'] is None) or (user['cookie'] == ''):
             needLogin = True
+            cookie = None
         else:
             cookie = json.loads(user['cookie'])
             createdAt = cookie['createdAt']
             createdAt = datetime.strptime(createdAt, '%Y-%m-%d %H:%M:%S')
             if (createdAt + timedelta(minutes=login_expire_minutes)) < now:
                 needLogin = True
+                cookie = None
+            # Need to login on both site
+            if login_both and (len(cookie) < 3):
+                print('Need to login the other site.')
+                needLogin = True
         if needLogin:
             # login.
             print('Login... ', user['login']['username'])
             try:
-                LoginRet = login(user['login']['username'],  user['login']['password'])
+                LoginRet = login(user['login']['username'],  user['login']['password'], cookie)
             except AssertionError as e:
                 print('Login failed: '+str(e))
                 user['comment'] += 'Change to pending: '+str(e)+'; '
@@ -683,22 +742,15 @@ if __name__ == '__main__':
     if (django_url is None) or (django_token is None):
         raise ValueError('django_url & django_token must be set.')
 
+    base_url = version = step = debug = req_timeout = req_retry = book_retry = book_timeout = cjy_auth = cjy_user = cjy_pass = cjy_soft = \
+        cjy_type = schedule_run = login_expire_minutes = login_both = ''
     debug = False
     req_timeout = req_retry = 10
-    base_url = getConfigValue('BASE_URL')
-    version = getConfigValue('API_VERSION')
-    step = int(getConfigValue('SCHEDULE_STEP'))
-    debug = bool(getConfigValue('SCHEDULE_DEBUG'))
-    req_timeout = int(getConfigValue('SCHEDULE_TIMEOUT'))
-    req_retry = int(getConfigValue('SCHEDULE_RETRY'))
-    book_retry = int(getConfigValue('BOOK_RETRY'))
-    book_timeout = int(getConfigValue('BOOK_TIMEOUT'))
-    login_expire_minutes = int(getConfigValue('CHECK_LOGIN_EXPIRE_MINUTES'))
-    cjy_auth = getConfigValue('CJY_AUTH')
-    cjy_user, cjy_pass, cjy_soft, cjy_type = cjy_auth.split(',')
+
+    setConfigs()
 
     while True:
-        if bool(getConfigValue('SCHEDULE_RUN')):
+        if schedule_run:
             user = selectUser()
             if not user:
                 print('No available user.')
