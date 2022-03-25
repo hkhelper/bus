@@ -155,11 +155,11 @@ def reset_action(modeladmin, request, queryset):
 
 class UserAdmin(ExportActionMixin, admin.ModelAdmin):
     list_display = (
-        'id', 'success', 'payment_link', 'show_status', 'linkComment', 'paidAt', 'loginInfo', 'priority', 'price', 'comment',
+        'id', 'success', 'payment_link', 'show_status', 'linkComment', 'use_slot', 'paidAt', 'loginInfo', 'priority', 'price', 'comment',
         'updatedAt', 'bookDate', 'runningNode', 'passengerCount', 'ticket_price', 'line', 'createdAt')
     list_filter = ('status', 'line')
     fieldsets = [
-        ('Login Info.', {'fields': ['line', 'loginInfo', 'passengerInfo', 'sort_date', 'allow_today']}),
+        ('Login Info.', {'fields': ['line', 'loginInfo', 'passengerInfo', 'sort_date', 'allow_today', 'use_slot']}),
         ('Sales Info.', {'fields': ['linkComment', 'comment', 'price', 'priority']}),
         ('Result', {'fields': ['cookie', 'runningNode', 'bookNumber', 'bookDate', 'status', 'added_by']}),
     ]
@@ -225,6 +225,9 @@ class LogAdmin(ExportActionMixin, admin.ModelAdmin):
     def has_operation_permission(self, request):
         return True
 
+class PayCardAdmin(admin.ModelAdmin):
+    list_display = ('card_info', 'amount',)
+
 class PaymentAdmin(ExportActionMixin, admin.ModelAdmin):
     # fields = ['code', 'msg']
     list_filter = ('card__card_info', 'bank_confirm', 'payAt')
@@ -264,7 +267,7 @@ admin.site.site_header = 'HKZH Admin'
 admin.site.register(Config, ConfigAdmin)
 admin.site.register(User, UserAdmin)
 admin.site.register(Line)
-admin.site.register(PayCard)
+admin.site.register(PayCard, PayCardAdmin)
 admin.site.register(Payment, PaymentAdmin)
 admin.site.register(Log, LogAdmin)
 admin.site.register(Slot, SlotAdmin)
