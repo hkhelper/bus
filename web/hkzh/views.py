@@ -47,6 +47,12 @@ def filterUserIdByDate(lineCode, date, availableCount):
         return 0
     return q.first().id
 
+def filterSlotUser():
+    q = User.objects.filter(use_slot=True).order_by('-id')
+    if q.count() == 0:
+        raise ValueError('No slot user set.')
+    return q.first().id
+
 def isDebugMode():
     return bool(Config.objects.get(key='debugMode').value)
 
@@ -65,6 +71,11 @@ def pay(request, pk):
     session = bookNumber[-1]
     link = hkmethod.redirectPayment(session)
     return render(request, 'hkzh/pay.html', {'userId': pk, 'link': link})
+
+class ConfigList(generics.ListAPIView):
+    permission_classes = (IsAuthenticated,)
+    queryset = Config.objects.all()
+    serializer_class = ConfigSerializer
 
 class ConfigGet(generics.RetrieveAPIView):
     permission_classes = (IsAuthenticated,)
@@ -136,6 +147,24 @@ class UserGetByDate(generics.ListAPIView):
             return response.Response({'error':str(e)})
         Log.objects.create(code='Found-'+kwargs['line'], msg='%i available in %s; Use user #%i' % (int(kwargs['count']), kwargs['date'], id))
         # Note the use of `get_queryset()` instead of `self.queryset`
+        queryset = self.get_queryset(id)
+        serializer = UserSerializer(queryset, many=True)
+        return response.Response(serializer.data)
+
+
+class UserGetSlot(generics.ListAPIView):
+    permission_classes = (IsAuthenticated,)
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+
+    def get_queryset(self, pk):
+        return User.objects.filter(pk=pk)
+
+    def list(self, request, *args, **kwargs):
+        try:
+            id = filterSlotUser()
+        except Exception as e:
+            return response.Response({'error': str(e)})
         queryset = self.get_queryset(id)
         serializer = UserSerializer(queryset, many=True)
         return response.Response(serializer.data)
