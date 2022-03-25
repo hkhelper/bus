@@ -29,6 +29,7 @@ class User(models.Model):
     sort_date = models.TextField(default="", blank=True, help_text='Each line for one date; Use -- for date range; Use * for all schedule date;')
     linkComment = models.CharField(max_length=200, blank=True, default="")
     allow_today = models.BooleanField(default=False)
+    use_slot = models.BooleanField(default=False)
     # schedule_book = models.BooleanField(default=False)
 
     cookie = models.CharField(max_length=5000, blank=True, default=None, null=True)
@@ -106,6 +107,7 @@ class User(models.Model):
 
 class PayCard(models.Model):
     card_info = models.CharField(max_length=100)
+    amount = models.FloatField(default=0)
 
     def __str__(self):
         return self.card_info
@@ -137,6 +139,8 @@ class Payment(models.Model):
                 # change status payment -> checking
                 user.status = 'checking'
                 user.save()
+            self.card.amount -= self.amount
+            self.card.save()
 
 
 class Log(models.Model):
