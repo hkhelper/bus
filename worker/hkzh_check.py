@@ -17,9 +17,44 @@ def getOrderList(statusStr):
         return []
     return books
 
+def getSlotOrder():
+    url = django_url + 'hkzh/api/user/slot/'
+    headers = {'Authorization': 'Token ' + django_token}
+    try:
+        r = sendReq(url, headers=headers, skipErrorStatusCode=True)
+        book = r.json()
+    except Exception as e:
+        print('Get slot user failed: ', e)
+        raise e
+    return book[0]
+
+def loginSlot():
+    order = getSlotOrder()
+    print("Use user #%i as slot token"% order['id'])
+    now = datetime.now()
+    if (order['status'] == 'login') and (order['cookie'] is not None) and (order['cookie'] != ''):
+        cookie = json.loads(order['cookie'])
+        createdAt = cookie['createdAt']
+        createdAt = datetime.strptime(createdAt, '%Y-%m-%d %H:%M:%S')
+        if (createdAt + timedelta(minutes=login_expire_minutes)) > now:
+            return processSlotCookie(cookie)
+    login_user, login_pwd = order['loginInfo'].split(',')
+    print('Start to login %s...method all...'%login_user)
+    loginRet = login(login_user, login_pwd, order['id'], method='all')
+    if not loginRet:
+        raise ValueError('Login failed.')
+    print('Login success.')
+    return processSlotCookie(loginRet)
+
+def processSlotCookie(cookie):
+    tokenAry = []
+    for bUrl, obj in cookie.items():
+        if 'token' in obj:
+            tokenAry.append({'baseUrl': bUrl, 'token': obj['token']})
+    return tokenAry
+
 def loginOrder():
     orderList = getOrderList('processing,login')
-    login_expire_minutes = int(getConfigValue('CHECK_LOGIN_EXPIRE_MINUTES'))
     now = datetime.now()
     count = success = 0
     for book in orderList:
@@ -248,6 +283,51 @@ def checkBookedStatus():
                     'paidAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 })
 
+def getConfigs():
+    url = django_url + 'hkzh/api/config/'
+    headers = {'Authorization': 'Token ' + django_token}
+    try:
+        r = sendReq(url, headers=headers, skipErrorStatusCode=True)
+        ret = r.json()
+    except Exception as e:
+        raise ValueError('Get config list error.')
+    config = {}
+    for row in ret:
+        config[row['key']] = row['value']
+    return config
+    
+def setConfigs():
+    global base_url, trig_url, wxpusher, telegram_id, version, today_delta_hours, check_line_code, step, concurrency_level, \
+        checkdate_step, debug, req_timeout, req_retry, book_retry, book_timeout, check_end_date, cjy_auth, cjy_user, cjy_pass, cjy_soft, \
+        cjy_type, login_expire_minutes, book_run, login_run, status_run, slot_run, check_date
+    
+    config = getConfigs()
+    
+    base_url = config['BASE_URL']
+    trig_url = config['TRIG_URL']
+    wxpusher = config['WX_PUSHER']
+    telegram_id = config['TG_ID']
+    version = config['API_VERSION']
+    today_delta_hours = float(config['TODAY_DELTA_HOURS'])
+    check_line_code = config['CHECK_LINE_CODE']
+    step = float(config['CHECK_STEP'])
+    concurrency_level = int(config['CHECK_CLEVEL'])
+    checkdate_step = float(config['CHECK_DATE_STEP'])
+    debug = bool(config['CHECK_DEBUG'])
+    req_timeout = float(config['REQ_TIMEOUT'])
+    req_retry = int(config['REQ_RETRY'])
+    book_retry = int(config['BOOK_RETRY'])
+    book_timeout = int(config['BOOK_TIMEOUT'])
+    check_end_date = config['CHECK_END_DATE']
+    cjy_auth = config['CJY_AUTH']
+    login_expire_minutes = int(config['CHECK_LOGIN_EXPIRE_MINUTES'])
+    book_run = bool(config['CHECK_BOOK_RUN'])
+    login_run = bool(config['CHECK_LOGIN_RUN'])
+    status_run = bool(config['CHECK_STATUS_RUN'])
+    slot_run = int(config['CHECK_SLOT_RUN'])
+    check_date = config['SCHEDULE_CHECK_DATE'].split(',')
+    cjy_user, cjy_pass, cjy_soft, cjy_type = cjy_auth.split(',')
+
 def getConfigValue(key):
     url = django_url + 'hkzh/api/config/' + key + '/'
     headers = {'Authorization': 'Token ' + django_token}
@@ -311,7 +391,7 @@ def updateBookInfo(id, data):
         print('Update user %i failed: '%id, str(ret))
         return False
 
-def login(user, pwd, id=None, updateLoginStatus=True):
+def login(user, pwd, id=None, updateLoginStatus=True, method='any'):
     success = False
     retAry = {}
     for burl in base_url.split(';'):
@@ -323,7 +403,11 @@ def login(user, pwd, id=None, updateLoginStatus=True):
         ret = r.json()
         if ('code' not in ret) or ('message' not in ret):
             print('Login returned json error: ' + str(ret))
-            continue
+            if method == 'any':
+                continue
+            elif method == 'all':
+                success = False
+                break
         if ret['code'] == 'FAIL':
             print('Login failed: '+ret['message'])
             if ret['message'] in ['賬戶或密碼錯誤', '用戶不存在']:
@@ -333,10 +417,18 @@ def login(user, pwd, id=None, updateLoginStatus=True):
                         'comment': 'Login failed: ' + ret['message']
                     })
                 raise AssertionError(ret['message'])
-            continue
+            if method == 'any':
+                continue
+            elif method == 'all':
+                success = False
+                break
         if 'jwt' not in ret:
             print('Login token not found in return: ' + str(ret))
-            continue
+            if method == 'any':
+                continue
+            elif method == 'all':
+                success = False
+                break
         token = ret['jwt']
         success = True
         retAry[burl] = {'cookie': cookie.get_dict()['PHPSESSID'], 'token': token}
@@ -572,14 +664,14 @@ def sendReq(url, data=None, method='get', timeout=None, retry=None, resp_json=Tr
     print('Retry too many times. Failed.')
     raise Exception('Retry too many times. Failed.')
 
-async def checkAvailableSlot(date, line_code, method, i=0):
+async def checkAvailableSlot(date, line_code, method, base_url, token):
     if debug:
         print(' Looking for available slot on ', date)
     async with httpx.AsyncClient() as client:
-        url = base_url.split(';')[i] + '/manage/query.book.info.data'
+        url = base_url + '/manage/query.book.info.data'
         data = {"bookDate": date, "lineCode": line_code, "appId": "HZMBWEB_HK", "joinType": "WEB",
                 "version": version, "equipment": "PC"}
-        headers = {'Authorization':  slot_token.split(';')[i]}
+        headers = {'Authorization':  token}
         try:
             resp = await client.post(url=url, json=data, timeout=req_timeout, headers=headers)
         except:
@@ -595,20 +687,20 @@ async def checkAvailableSlot(date, line_code, method, i=0):
         except ValueError:
             print(time.strftime("%H:%M:%S") + f'  #Got json decode error: {resp.text}')
             return slotRespProc(data=False)
-        return slotRespProc(data=data, date=date, method=method)
+        return slotRespProc(data=data, date=date, method=method, base_url=base_url)
 
-def slotRespProc(data, date=None, method=None):
+def slotRespProc(data, date=None, method=None, base_url=None):
     if debug:
         print('Got return '+str(data))
     if not data:
         return
     slotlist = data
     if 'responseData' not in slotlist:
-        print('Can not found responseData in slotlist', slotlist)
+        print('Can not found responseData in slotlist', slotlist, base_url)
         return
     df = pd.DataFrame(slotlist['responseData'])
     if 'bookDate' not in df.columns:
-        print(date, 'ResponseData in slotlist is empty.', df)
+        print(date, 'ResponseData in slotlist is empty.', df, base_url)
         return
     if len(df) > 0:
         df['availablePeople'] = df['maxPeople'] - df['totalPeople']
@@ -625,7 +717,7 @@ def slotRespProc(data, date=None, method=None):
         available_people = slotlist['availablePeople'].sum()
     else:
         available_people = 0
-    print('Found %i/%i available on' % (available_people, totals_people), date)
+    print('Found %i/%i available on' % (available_people, totals_people), date, base_url)
     if (method == 'check') and (available_people > 0):
         runBook(slotlist)
     elif (method == 'checkopen') and (totals_people > 0):
@@ -715,7 +807,7 @@ def runBook(slotlist):
         if not bookData:
             print('No user need.')
             continue
-        if bool(getConfigValue('CHECK_BOOK_RUN')):
+        if book_run:
             print('Working on User #%i' % bookData['id'])
             cookie = json.loads(bookData['cookie'])
             login_user, login_pwd = bookData['loginInfo'].split(',')
@@ -792,13 +884,15 @@ def runBook(slotlist):
 
 async def checkRun():
     while True:
+        setConfigs()
+        
         now = datetime.now()
         print(now.strftime('%m-%d %H:%M:%S'))
-        if bool(getConfigValue('CHECK_LOGIN_RUN')):
+        if login_run:
             # 登入账号
             loginOrder()
 
-        if bool(getConfigValue('CHECK_STATUS_RUN')):
+        if status_run:
             # 更新待付款订单状态
             try:
                 checkBookedStatus()
@@ -807,58 +901,48 @@ async def checkRun():
 
         baseurl_count = len(base_url.split(';'))
         date_delta = datetime.strptime(check_end_date, '%Y-%m-%d') - now
-        if int(getConfigValue('CHECK_SLOT_RUN')) == 1:
+        try:
+            slot_token = loginSlot()
+        except Exception as e:
+            print(e)
+            continue
+        if slot_run == 1:
             for line_code in check_line_code.split(','):
                 for n in range(0, date_delta.days+2):
                     for i in range(0, concurrency_level):
                         date = (now + timedelta(days=n)).strftime('%Y-%m-%d')
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'check', i % baseurl_count))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'check', slot_token[i % baseurl_count]['baseUrl'], slot_token[i % baseurl_count]['token']))
                         await asyncio.sleep(checkdate_step)
                 for i in range(0, concurrency_level):
-                    date = getConfigValue('SCHEDULE_CHECK_DATE').split(',')[0]
-                    asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', i % baseurl_count))
+                    date = check_date[0]
+                    asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', slot_token[i % baseurl_count]['baseUrl'], slot_token[i % baseurl_count]['token']))
                     await asyncio.sleep(checkdate_step)
-        elif int(getConfigValue('CHECK_SLOT_RUN')) == 2:
+        elif slot_run == 2:
             for line_code in check_line_code.split(','):
-                for date in getConfigValue('SCHEDULE_CHECK_DATE').split(','):
+                for date in check_date:
                     for i in range(0, concurrency_level):
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'slot', i % baseurl_count))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'slot', slot_token[i % baseurl_count]['baseUrl'], slot_token[i % baseurl_count]['token']))
                         await asyncio.sleep(checkdate_step)
-        elif int(getConfigValue('CHECK_SLOT_RUN')) == 3:
+        elif slot_run == 3:
             for line_code in check_line_code.split(','):
-                for date in getConfigValue('SCHEDULE_CHECK_DATE').split(','):
+                for date in check_date:
                     for i in range(0, concurrency_level):
-                        asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', i % baseurl_count))
+                        asyncio.create_task(checkAvailableSlot(date, line_code, 'checkopen', slot_token[i % baseurl_count]['baseUrl'], slot_token[i % baseurl_count]['token']))
                         await asyncio.sleep(checkdate_step)
 
 
         await asyncio.sleep(step)
 
 
+
 if __name__ == '__main__':
     if (django_url is None) or (django_token is None):
         raise ValueError('django_url & django_token must be set.')
 
+    base_url = trig_url = wxpusher = telegram_id = version = today_delta_hours = check_line_code = step = concurrency_level = \
+    checkdate_step = debug = req_timeout = req_retry = book_retry = book_timeout = check_end_date = cjy_auth = cjy_user = cjy_pass = cjy_soft = \
+    cjy_type = login_expire_minutes = book_run = login_run = status_run = slot_run = check_date = ''
     debug = False
     req_timeout = req_retry = 10
-    base_url = getConfigValue('BASE_URL')
-    slot_token = getConfigValue('slot_token')
-    trig_url = getConfigValue('TRIG_URL')
-    wxpusher = getConfigValue('WX_PUSHER')
-    telegram_id = getConfigValue('TG_ID')
-    version = getConfigValue('API_VERSION')
-    today_delta_hours = float(getConfigValue('TODAY_DELTA_HOURS'))
-    check_line_code = getConfigValue('CHECK_LINE_CODE')
-    step = float(getConfigValue('CHECK_STEP'))
-    concurrency_level = int(getConfigValue('CHECK_CLEVEL'))
-    checkdate_step = float(getConfigValue('CHECK_DATE_STEP'))
-    debug = bool(getConfigValue('CHECK_DEBUG'))
-    req_timeout = float(getConfigValue('REQ_TIMEOUT'))
-    req_retry = int(getConfigValue('REQ_RETRY'))
-    book_retry = int(getConfigValue('BOOK_RETRY'))
-    book_timeout = int(getConfigValue('BOOK_TIMEOUT'))
-    check_end_date = getConfigValue('CHECK_END_DATE')
-    cjy_auth = getConfigValue('CJY_AUTH')
-    cjy_user, cjy_pass, cjy_soft, cjy_type = cjy_auth.split(',')
 
     asyncio.run(checkRun())
