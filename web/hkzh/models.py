@@ -110,7 +110,7 @@ class PayCard(models.Model):
     amount = models.FloatField(default=0)
 
     def __str__(self):
-        return self.card_info+'($'+self.amount+')'
+        return self.card_info+'($'+str(self.amount)+')'
 
 class Payment(models.Model):
     card = models.ForeignKey(PayCard, on_delete=models.CASCADE)
