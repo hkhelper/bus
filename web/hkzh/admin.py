@@ -231,7 +231,7 @@ class PayCardAdmin(admin.ModelAdmin):
 class PaymentAdmin(ExportActionMixin, admin.ModelAdmin):
     # fields = ['code', 'msg']
     list_filter = ('card__card_info', 'bank_confirm', 'payAt')
-    list_display = ('id', 'payAt', 'card', 'amount', 'user_id', 'comment', 'bank_confirm', 'createdAt', 'updatedAt')
+    list_display = ('id', 'payAt', 'cardName', 'amount', 'user_id', 'comment', 'bank_confirm', 'createdAt', 'updatedAt')
     actions = ExportActionMixin.actions
 
     for exportAction in ExportActionMixin.actions:
@@ -240,6 +240,9 @@ class PaymentAdmin(ExportActionMixin, admin.ModelAdmin):
         'confirm_action',
         'unconfirm_action',
     ]
+    
+    def cardName(self, obj):
+        return obj.card.card_info
 
     @admin.action(description='Confirm')
     def confirm_action(self, request, queryset):
