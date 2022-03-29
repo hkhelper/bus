@@ -563,7 +563,7 @@ def bookRun(user):
                 needLogin = True
                 cookie = None
             # Need to login on both site
-            elif login_both and (len(cookie) < 3):
+            elif login_both and (len(cookie) < (1+len(base_url.split(';')))):
                 print('Need to login the other site.')
                 needLogin = True
         if needLogin:
