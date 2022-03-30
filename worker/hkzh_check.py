@@ -820,8 +820,10 @@ def runBook(slotlist):
             order = None
             for bi in range(book_retry):
                 try:
-                    captchaBase64 = getCaptcha(cookie)
-                    captcha = captchaFromCjy(captchaBase64)
+                    # TODO: need change to aliyun slider verify
+#                     captchaBase64 = getCaptcha(cookie)
+#                     captcha = captchaFromCjy(captchaBase64)
+                    captcha = '0000'
                     order = book(slot['bookDate'], slot['beginTime'], slot['endTime'], passengers, cookie,
                                  slot['lineCode'], captcha)
                 except ValueError as e:
